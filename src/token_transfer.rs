@@ -12,6 +12,11 @@ pub struct TokenTransferItem {
     pub to: AddressInfo,
     pub token: TokenInfo,
     pub total: Total,
+    pub log_index: String,
+    pub method: String,
+    pub timestamp: String,
+    pub tx_hash: String,
+    pub r#type: String,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -46,8 +51,8 @@ pub struct TokenInfo {
 }
 
 // When deserializing, you'll need a custom implementation:
-impl From<Vec<(String, AddressInfo, AddressInfo, TokenInfo, Total)>> for TokenTransfer {
-    fn from(data: Vec<(String, AddressInfo, AddressInfo, TokenInfo, Total)>) -> Self {
+impl From<Vec<(String, AddressInfo, AddressInfo, TokenInfo, Total, String, String, String, String, String)>> for TokenTransfer {
+    fn from(data: Vec<(String, AddressInfo, AddressInfo, TokenInfo, Total, String, String, String, String, String)>) -> Self {
         let items = data
             .into_iter()
             .map(|item| TokenTransferItem {
@@ -56,6 +61,11 @@ impl From<Vec<(String, AddressInfo, AddressInfo, TokenInfo, Total)>> for TokenTr
                 to: item.2,
                 token: item.3,
                 total: item.4,
+                log_index: item.5,
+                method: item.6,
+                timestamp: item.7,
+                tx_hash: item.8,
+                r#type: item.9,
             })
             .collect();
         TokenTransfer { items }
