@@ -99,10 +99,10 @@ async fn answer(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
                             if let Some(first_transfer) = token_transfer.items.first() {
                                 let transaction_hash = first_transfer.tx_hash.clone();
                         let current_transaction_to_name = first_transfer.to.name.clone().unwrap_or_default();
-                        println!("Current transaction hash: {}", transaction_hash);
+                        // println!("Current transaction hash: {}", transaction_hash);
                         if flag_transaction_hash != transaction_hash && !current_transaction_to_name.is_empty() {
                             flag_transaction_hash = transaction_hash;
-                            println!("Flag transaction hash: {}", flag_transaction_hash);
+                            // println!("Flag transaction hash: {}", flag_transaction_hash);
                             
                             //get token overview
                             let token_overview = get_token_overview(request_client.clone(), &debank_api_key, &token_adr).await.unwrap();
@@ -226,7 +226,7 @@ async fn get_tx_info(client: Client, tx_hash: &str) -> Result<TxInfo, serde_json
     let url = format!("https://apechain.calderaexplorer.xyz/api/v2/transactions/{}", tx_hash);
     let response = client.get(&url).send().await.unwrap();
     let text = response.text().await.unwrap();
-    println!("tx_info: {}", text);
+    // println!("tx_info: {}", text);
     match serde_json::from_str::<TxInfo>(&text) {
         Ok(tx_info) => Ok(tx_info),
         Err(e) => {
