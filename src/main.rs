@@ -1,12 +1,10 @@
-pub mod wallet_using_token;
-pub mod token_holders;
+pub mod token_overview;
 pub mod token_transfer;
+pub mod tx_info;
 
 use reqwest::Client;
-// use wallet_using_token::{HolderInfo, TokenTopHolders};
 use dotenv::dotenv;
 use log::{info, error};
-use std::env;
 use tokio;
 // use tokio::time;
 use teloxide::{
@@ -14,8 +12,10 @@ use teloxide::{
     types::{Me, MessageKind},
     utils::command::BotCommands,
 };
-use token_holders::{TokenHolder, Address, TokenInfo};
-use token_transfer::{TokenTransfer, TokenTransferItem,AddressInfo, Total};
+use token_transfer::TokenTransfer;
+use tx_info::TxInfo;
+use token_overview::TokenOverview;
+
 
 #[derive(BotCommands, Clone)]
 #[command(
@@ -87,6 +87,7 @@ async fn answer(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
             info!("Received command /s for token: {}", token_adr);
             
             let request_client = Client::new();
+            let debank_api_key = std::env::var("DEBANK_API_KEY").unwrap();
             let interval = tokio::time::interval(std::time::Duration::from_secs(5));
             tokio::spawn(async move {
                 let mut interval = interval;
@@ -96,33 +97,55 @@ async fn answer(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
                     match get_token_transfers(request_client.clone(), &token_adr).await {
                         Ok(token_transfer) => {
                             if let Some(first_transfer) = token_transfer.items.first() {
-                                let transaction_hash = first_transfer.block_hash.clone();
+                                let transaction_hash = first_transfer.tx_hash.clone();
                         let current_transaction_to_name = first_transfer.to.name.clone().unwrap_or_default();
                         println!("Current transaction hash: {}", transaction_hash);
                         if flag_transaction_hash != transaction_hash && !current_transaction_to_name.is_empty() {
                             flag_transaction_hash = transaction_hash;
                             println!("Flag transaction hash: {}", flag_transaction_hash);
+                            
+                            //get token overview
+                            let token_overview = get_token_overview(request_client.clone(), &debank_api_key, &token_adr).await.unwrap();
+                            let token_price = token_overview.price;
+                            let token_price_output = num_floating_point(&token_price, 5);
 
                             //make message
                             let token_address = &token_transfer.items[0].token.address;
                             let token_name = &token_transfer.items[0].token.name;
                             let token_symbol = &token_transfer.items[0].token.symbol;
-                            let token_tx_value = &token_transfer.items[0].total.value.parse().unwrap_or(0.0);
-                            let token_tx_decimal = &token_transfer.items[0].total.decimals.parse().unwrap_or(0.0);
                             let token_decimals = &token_transfer.items[0].token.decimals.parse().unwrap_or(0.0);
+                            let token_tx_decimal = &token_transfer.items[0].total.decimals.parse().unwrap_or(0.0);
+                            let token_tx_value = &token_transfer.items[0].total.value.parse().unwrap_or(0.0) / 10_f64.powi(*token_tx_decimal as i32);
                             let token_total_supply = &token_transfer.items[0].token.total_supply.parse().unwrap_or(0.0);
-                            let token_tx_spent = controll_big_float(*token_tx_value / 10_f64.powi(*token_tx_decimal as i32));
-                            let total_supply = controll_big_float(*token_total_supply / 10_f64.powi(*token_decimals as i32));
+                            let total_supply = *token_total_supply / 10_f64.powi(*token_decimals as i32);
+
+                            //get transaction info
+                            let tx_info = get_tx_info(request_client.clone(), &flag_transaction_hash).await.unwrap();
+                            let tx_fee = controll_big_float(tx_info.fee.value.parse().unwrap_or(0.0) / 10_f64.powi(*token_decimals as i32));
+                            let tx_value = token_tx_value - tx_info.fee.value.parse().unwrap_or(0.0) / 10_f64.powi(*token_decimals as i32);
+                            let tx_value_output = num_floating_point(&tx_value, 5);
+                            let tx_value_usd = controll_big_float(tx_value * token_price);
+                            let tx_total_usd = controll_big_float(token_tx_value * token_price);
+                            // let tx_value = controll_big_float(tx_info.value.parse().unwrap_or(0.0) / 10_f64.powi(*token_decimals as i32));
+
+                            let mcap = controll_big_float(total_supply * token_price);
 
                             let text = format!(
                                 "<a href=\"https://dexscreener.com/apechain/{0}\">🚀</a> <code>{0}</code>\n\n\
-                                💲Spent: <code>{1}</code>\n{2} {3}\n\
-                                Tx <a href=\"https://apechain.calderaexplorer.xyz/tx/{4}\">🔗</a>: <code>{4}</code>\n\
+                                💲 Spent: ${1} (${9}) {2}\n\
+                                💰 Got: {6} ${3}\n\
+                                💸 Fee: {8}\n\
                                 ✅ Dex: <a href=\"https://ape.express/explore/{0}?\">Ape_Express</a> | \
-                                🔖<a href=\"https://book.trending.xyz/token/{0}\">Book Trending</a> - \
+                                🔖 <a href=\"https://t.me/ApechainTrending_Bot\">Book Trending</a> - \
                                 <a href=\"https://t.me/ApechainADSBot\">DexScreener</a>\n\
-                                📊 total_supply: {5}",
-                                token_address, token_tx_spent, token_name, token_symbol, flag_transaction_hash, total_supply
+                                🏷️ Price: ${7}\n\
+                                📊 Marketcap: ${5}\n\n\
+                                <a href=\"https://apechain.calderaexplorer.xyz/tx/{4}\">TX</a> | \
+                                <a href=\"https://dexscreener.com/apechain/{0}\">Chart</a> | \
+                                <a href=\"https://t.me/ApechainADSBot\">TG</a> | \
+                                <a href=\"https://x.com/Apechain_xyz\">X</a> | \
+                                <a href=\"https://book.trending.xyz/token/{0}\">Website</a>",
+                                token_address, tx_value_usd, token_name, token_symbol, flag_transaction_hash, mcap, tx_value_output, token_price_output, tx_fee, tx_total_usd
                             );
                             
                             bot.send_message(msg.chat.id, text)
@@ -192,6 +215,33 @@ async fn get_token_transfers(client: Client, token_address: &str) -> Result<Toke
     // Try to parse and log any error details
     match serde_json::from_str::<TokenTransfer>(&text) {
         Ok(transfer) => Ok(transfer),
+        Err(e) => {
+            error!("Deserialization error: {}", e);
+            Err(e)
+        }
+    }
+}
+
+async fn get_tx_info(client: Client, tx_hash: &str) -> Result<TxInfo, serde_json::Error> {
+    let url = format!("https://apechain.calderaexplorer.xyz/api/v2/transactions/{}", tx_hash);
+    let response = client.get(&url).send().await.unwrap();
+    let text = response.text().await.unwrap();
+    println!("tx_info: {}", text);
+    match serde_json::from_str::<TxInfo>(&text) {
+        Ok(tx_info) => Ok(tx_info),
+        Err(e) => {
+            error!("Deserialization error: {}", e);
+            Err(e)
+        }
+    }
+}   
+
+async fn get_token_overview(client: Client, api_key: &str, token_address: &str) -> Result<TokenOverview, serde_json::Error> {
+    let url = format!("https://pro-openapi.debank.com/v1/token?chain_id=ape&id={}", token_address);
+    let response = client.get(&url).header("Accesskey", api_key).send().await.unwrap();
+    let text = response.text().await.unwrap();
+    match serde_json::from_str::<TokenOverview>(&text) {
+        Ok(token_overview) => Ok(token_overview),
         Err(e) => {
             error!("Deserialization error: {}", e);
             Err(e)
